@@ -130,3 +130,5 @@ class Song:
             assert play_called or (
                 not play_called and frame < 1000
             ), "Too many frames before play called"
+            if play_called:
+                pass

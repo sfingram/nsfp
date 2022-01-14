@@ -1,5 +1,3 @@
-# NSF Parser
+# NSF Transcription
 
-This is an attempt to document the NSF format by writing a fully documented parser.  
-
-The code is not optimized for speed but for understanding the format.
+Use the [NotSoFatso](http://www.vgmpf.com/Wiki/index.php/Not_So,_Fatso!) winamp library to transcribe NSF files to a kind of musical notation.  Based largely off of the code in [Famistudio](https://github.com/BleuBleu/FamiStudio).

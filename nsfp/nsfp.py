@@ -1,143 +1,132 @@
 """
-Read an NSF (NES Sound File) 
-
-(from https://wiki.nesdev.org/w/index.php/NSF ) :
-
-offset  # of bytes   Function
-----------------------------
-$000    5   STRING  'N','E','S','M',$1A (denotes an NES sound format file)
-$005    1   BYTE    Version number $01 (or $02 for NSF2)
-$006    1   BYTE    Total songs   (1=1 song, 2=2 songs, etc)
-$007    1   BYTE    Starting song (1=1st song, 2=2nd song, etc)
-$008    2   WORD    (lo, hi) load address of data ($8000-FFFF)
-$00A    2   WORD    (lo, hi) init address of data ($8000-FFFF)
-$00C    2   WORD    (lo, hi) play address of data ($8000-FFFF)
-$00E    32  STRING  The name of the song, null terminated
-$02E    32  STRING  The artist, if known, null terminated
-$04E    32  STRING  The copyright holder, null terminated
-$06E    2   WORD    (lo, hi) Play speed, in 1/1000000th sec ticks, NTSC (see text)
-$070    8   BYTE    Bankswitch init values (see text, and FDS section)
-$078    2   WORD    (lo, hi) Play speed, in 1/1000000th sec ticks, PAL (see text)
-$07A    1   BYTE    PAL/NTSC bits
-                bit 0: if clear, this is an NTSC tune
-                bit 0: if set, this is a PAL tune
-                bit 1: if set, this is a dual PAL/NTSC tune
-                bits 2-7: reserved, must be 0
-$07B    1   BYTE    Extra Sound Chip Support
-                bit 0: if set, this song uses VRC6 audio
-                bit 1: if set, this song uses VRC7 audio
-                bit 2: if set, this song uses FDS audio
-                bit 3: if set, this song uses MMC5 audio
-                bit 4: if set, this song uses Namco 163 audio
-                bit 5: if set, this song uses Sunsoft 5B audio
-                bit 6: if set, this song uses VT02+ audio
-                bit 7: reserved, must be zero
-$07C    1   BYTE    Reserved for NSF2
-$07D    3   BYTES   24-bit length of contained program data.
-                If 0, all data until end of file is part of the program.
-                If used, can be used to provide NSF2 metadata
-                in a backward compatible way.
+Read an NSF (NES Sound File) using the NotSoFatSo library.
 """
 
-NSF_MAGIC = b"NESM\x1a"
-MAX_SUPPORTED_VERSION = 2
-
-
-def read_c_string(buf, strlen=32):
-    """reads a null terminated string from a buffer"""
-    return buf.read(strlen).decode("ascii").split("\0")[0]
-
-
-def read_k_byte_int(buf, k):
-    """reads a k-byte integer from a buffer"""
-    return int.from_bytes(buf.read(k), byteorder="little")
-
-
-def read_16_bit_word(buf):
-    """reads a 16 bit little-endian word from a buffer"""
-    return read_k_byte_int(buf, 2)
-
-
-def read_8_bit_word(buf):
-    """reads a 16 bit little-endian word from a buffer"""
-    return read_k_byte_int(buf, 1)
+from typing import List
+from .nsf_build import NSF_LIB, ffibuilder
+from .constants import *
 
 
 class NSF:
-    def __init__(self, filename):
+    def __init__(self, filename, pattern_length=256, duration=120):
         self.filename = filename
-        self.file = open(filename, "rb")
-        self.header = self.read_header()
-        self.is_ntsc = (self.header["pal_ntsc"] & 0x01) == 0
+        self.pattern_length = pattern_length
+        self.duration = duration
+
+        # open/parse the nsf file
+        self.file = NSF_LIB.NsfOpen(ffibuilder.new("char[]", filename.encode("ascii")))
+        assert (
+            ffibuilder.cast("uint32_t", self.file) != 0
+        ), f"Failed to open NSF file:  {filename}"
+
+        # extract the metadata
+        self.track_count = NSF_LIB.NsfGetTrackCount(self.file)
+        self.is_ntsc = NSF_LIB.NsfIsPal(self.file) == 0
         self.is_pal = not self.is_ntsc
-        self.is_dual_pal_ntsc = (self.header["pal_ntsc"] & 0x02) != 0
-        self.is_vrc6 = (self.header["extra_sound_chip_support"] & 0x01) != 0
-        self.is_vrc7 = (self.header["extra_sound_chip_support"] & 0x02) != 0
-        self.is_fds = (self.header["extra_sound_chip_support"] & 0x04) != 0
-        self.is_mmc5 = (self.header["extra_sound_chip_support"] & 0x08) != 0
-        self.is_namco_163 = (self.header["extra_sound_chip_support"] & 0x10) != 0
-        self.is_sunsoft_5b = (self.header["extra_sound_chip_support"] & 0x20) != 0
-        self.is_vt02 = (self.header["extra_sound_chip_support"] & 0x40) != 0
-        self.file.close()
+        self.frame_rate = 60 if self.is_ntsc else 50
+        self.frame_count = self.duration * self.frame_rate
+        self.title = ffibuilder.string(NSF_LIB.NsfGetTitle(self.file)).decode("ascii")
+        self.artist = ffibuilder.string(NSF_LIB.NsfGetArtist(self.file)).decode("ascii")
+        self.copyright = ffibuilder.string(NSF_LIB.NsfGetCopyright(self.file)).decode(
+            "ascii"
+        )
+        self.expansion = int(
+            ffibuilder.cast("uint32_t", NSF_LIB.NsfGetExpansion(self.file))
+        )
+        assert (
+            self.expansion & ALL_MASK == self.expansion
+        ), f"Invalid expansion mask:  {hex(self.expansion)}"
 
-    def read_header(self):
-        """reads and validates the NSF header"""
-        header = {}
+        # pull out the songs
+        self.songs = [Song(self, i) for i in range(self.track_count)]
 
-        # the first five bytes are the magic number
-        header["magic"] = self.file.read(5)
-        if header["magic"] != NSF_MAGIC:
-            raise Exception("Invalid NSF file:  Bad magic number.")
 
-        # the next byte is the version number
-        header["version"] = read_8_bit_word(self.file)
-        if header["version"] > MAX_SUPPORTED_VERSION:
-            raise Exception("Invalid NSF file:  Unsupported version.")
+class Channel:
+    @staticmethod
+    def namco_count(nsf: NSF, track: int) -> int:
+        """get the number of namco channels + 1 in a track"""
+        namco_count = 1
+        if nsf.expansion & N163_MASK != 0:
+            NSF_LIB.NsfSetTrack(nsf.file, track)
+            for i in range(nsf.frame_count):
+                playing = int(NSF_LIB.NsfRunFrame(nsf.file)) != 0
+                if playing:
+                    namco_count = max(
+                        namco_count,
+                        int(
+                            NSF_LIB.NsfGetState(
+                                nsf.file, CHANNEL_N163WAVE1, STATE_N163NUMCHANNELS, 0
+                            )
+                        ),
+                    )
+        return namco_count
 
-        # the next byte is the number of songs
-        header["num_songs"] = read_8_bit_word(self.file)
+    @staticmethod
+    def is_active(channel_id: int, expansion: int, namco_count: int) -> bool:
+        if channel_id < CHANNEL_EXPANSIONAUDIOSTART:
+            return True
+        if channel_id >= CHANNEL_VRC6SQUARE1 and channel_id <= CHANNEL_VRC6SAW:
+            return expansion & VRC6_MASK != 0
+        if channel_id >= CHANNEL_VRC7FM1 and channel_id <= CHANNEL_VRC7FM6:
+            return expansion & VRC7_MASK != 0
+        if channel_id == CHANNEL_FDSWAVE:
+            return expansion & FDS_MASK != 0
+        if channel_id >= CHANNEL_MMC5SQUARE1 and channel_id <= CHANNEL_MMC5DPCM:
+            return expansion & MMC5_MASK != 0
+        if channel_id >= CHANNEL_N163WAVE1 and channel_id <= CHANNEL_N163WAVE8:
+            return (
+                expansion & N163_MASK != 0
+                and channel_id - CHANNEL_N163WAVE1 < namco_count
+            )
+        if channel_id >= CHANNEL_S5BSQUARE1 and channel_id <= CHANNEL_S5BSQUARE3:
+            return expansion & S5B_MASK != 0
+        assert False, f"Invalid channel id:  {channel_id}"
 
-        # the next byte is the starting song
-        header["start_song"] = read_8_bit_word(self.file)
+    def __init__(self, channel_id):
+        self.channel_id = channel_id
+        self.reset()
 
-        # the next two bytes are the load address
-        header["load_address"] = read_16_bit_word(self.file)
+    def reset(self):
+        self.triggered = 1
+        self.released = 2
+        self.stopped = 0
 
-        # the next two bytes are the init address
-        header["init_address"] = read_16_bit_word(self.file)
+        self.period = -1
+        self.note = 0
+        self.pitch = 0
+        self.volume = 15
+        self.octave = -1
+        self.state = self.stopped
 
-        # the next two bytes are the play address
-        header["play_address"] = read_16_bit_word(self.file)
+        self.fds_mod_depth = 0
+        self.fds_mod_speed = 0
 
-        # the next 32 bytes are the album name
-        header["album"] = read_c_string(self.file)
+        self.instrument = None
 
-        # the next 32 bytes are the artist name
-        header["artist"] = read_c_string(self.file)
 
-        # the next 32 bytes are the copyright holder
-        header["copyright"] = read_c_string(self.file)
+def make_channels(nsf: NSF, track: int) -> List[Channel]:
+    """create a list of channels for a track"""
+    namco_count = Channel.namco_count(nsf, track)
+    return [
+        Channel(i)
+        for i in range(CHANNEL_COUNT)
+        if Channel.is_active(i, nsf.expansion, namco_count)
+    ]
 
-        # the next two bytes are the play speed
-        header["play_speed_ntsc"] = read_16_bit_word(self.file)
 
-        # the next 8 bytes are the bankswitch init values
-        header["bankswitch_init"] = self.file.read(8)
-
-        # the next two bytes are the play speed
-        header["play_speed_pal"] = read_16_bit_word(self.file)
-
-        # the next byte is the PAL/NTSC bits
-        header["pal_ntsc"] = read_8_bit_word(self.file)
-
-        # the next byte is the extra sound chip support
-        header["extra_sound_chip_support"] = read_8_bit_word(self.file)
-
-        # the next byte is the reserved byte
-        header["reserved"] = read_8_bit_word(self.file)
-
-        # the next 3 bytes are data length
-        header["data_length"] = read_k_byte_int(self.file, 3)
-
-        return header
-
+class Song:
+    def __init__(self, nsf, index):
+        self.nsf = nsf
+        self.index = index
+        self.num_frames = nsf.duration * nsf.frame_rate
+        raw_name = NSF_LIB.NsfGetTrackName(nsf.file, index)
+        self.name = ffibuilder.string(raw_name).decode("ascii")
+        if len(self.name) == 0:
+            self.name = f"Track {index}"
+        self.channels = {i: v for i, v in enumerate(make_channels(nsf, index))}
+        NSF_LIB.NsfSetTrack(nsf.file, index)
+        for frame in range(self.num_frames):
+            play_called = NSF_LIB.NsfRunFrame(nsf.file) != 0
+            assert play_called or (
+                not play_called and frame < 1000
+            ), "Too many frames before play called"

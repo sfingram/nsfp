@@ -2,9 +2,35 @@
 Read an NSF (NES Sound File) using the NotSoFatSo library.
 """
 
-from typing import List
-from .nsf_build import NSF_LIB, ffibuilder
-from .constants import *
+from typing import Any, List
+
+from .constants import (
+    ALL_MASK,
+    CHANNEL_COUNT,
+    CHANNEL_EXPANSIONAUDIOSTART,
+    CHANNEL_FDSWAVE,
+    CHANNEL_MMC5DPCM,
+    CHANNEL_MMC5SQUARE1,
+    CHANNEL_N163WAVE1,
+    CHANNEL_N163WAVE8,
+    CHANNEL_S5BSQUARE1,
+    CHANNEL_S5BSQUARE3,
+    CHANNEL_VRC6SAW,
+    CHANNEL_VRC6SQUARE1,
+    CHANNEL_VRC7FM1,
+    CHANNEL_VRC7FM6,
+    FDS_MASK,
+    MMC5_MASK,
+    N163_MASK,
+    S5B_MASK,
+    STATE_N163NUMCHANNELS,
+    VRC6_MASK,
+    VRC7_MASK,
+)
+from .nsf_build import NSF_LIB as _NSF_LIB, ffibuilder
+
+# Re-annotate as Any since cffi Lib attributes are defined dynamically
+NSF_LIB: Any = _NSF_LIB
 
 
 class NSF:

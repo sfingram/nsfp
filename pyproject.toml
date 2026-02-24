@@ -1,0 +1,52 @@
+[project]
+name = "nsfp"
+version = "1.0.0"
+description = "An educational NSF (NES Sound Format) file parser."
+readme = "README.md"
+license = "GPL-2.0-or-later"
+requires-python = ">=3.8"
+authors = [
+    { name = "Stephen Ingram", email = "stephenfroweingram@gmail.com" }
+]
+keywords = ["nsf", "nes", "audio", "parser", "chiptune"]
+classifiers = [
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: Implementation :: PyPy",
+]
+dependencies = [
+    "cffi>=1.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/sfingram/nsfp"
+Repository = "https://github.com/sfingram/nsfp"
+
+[project.optional-dependencies]
+dev = [
+    "twine>=4.0.0",
+    "build>=1.0.0",
+]
+
+[build-system]
+requires = ["scikit-build-core>=0.11"]
+build-backend = "scikit_build_core.build"
+
+[tool.scikit-build]
+cmake.version = ">=3.15"
+wheel.packages = ["nsfp"]
+# Build library in source tree for editable installs
+editable.mode = "inplace"
+
+[dependency-groups]
+dev = [
+    "twine>=4.0.0",
+    "build>=1.0.0",
+    "types-cffi>=0.16.0",
+]

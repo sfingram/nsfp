@@ -49,4 +49,5 @@ dev = [
     "twine>=4.0.0",
     "build>=1.0.0",
     "types-cffi>=0.16.0",
+    "pytest>=7.0.0",
 ]
